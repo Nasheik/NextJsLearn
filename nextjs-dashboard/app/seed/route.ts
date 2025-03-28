@@ -1,10 +1,10 @@
+import bcrypt from 'bcryptjs';
 import postgres from 'postgres';
 import { invoices, customers, revenue, users } from '../lib/placeholder-data';
 
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
 
-async function seedUsers() {
-  console.log('Seeding users');
+async function seedUsers(sql: postgres.TransactionSql) {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
   await sql`
     CREATE TABLE IF NOT EXISTS users (
@@ -17,7 +17,7 @@ async function seedUsers() {
 
   const insertedUsers = await Promise.all(
     users.map(async (user) => {
-      const hashedPassword = user.password;
+      const hashedPassword = await bcrypt.hash(user.password, 10);
       return sql`
         INSERT INTO users (id, name, email, password)
         VALUES (${user.id}, ${user.name}, ${user.email}, ${hashedPassword})
@@ -29,7 +29,7 @@ async function seedUsers() {
   return insertedUsers;
 }
 
-async function seedInvoices() {
+async function seedInvoices(sql: postgres.TransactionSql) {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
 
   await sql`
@@ -55,7 +55,7 @@ async function seedInvoices() {
   return insertedInvoices;
 }
 
-async function seedCustomers() {
+async function seedCustomers(sql: postgres.TransactionSql) {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
 
   await sql`
@@ -80,7 +80,7 @@ async function seedCustomers() {
   return insertedCustomers;
 }
 
-async function seedRevenue() {
+async function seedRevenue(sql: postgres.TransactionSql) {
   await sql`
     CREATE TABLE IF NOT EXISTS revenue (
       month VARCHAR(4) NOT NULL UNIQUE,
@@ -102,18 +102,16 @@ async function seedRevenue() {
 }
 
 export async function GET() {
-  console.log('Seeding database');
   try {
-    const result = await sql.begin(async (sql) => {
-      await seedUsers();
-      await seedCustomers();
-      await seedInvoices();
-      await seedRevenue();
-    });
+    const result = await sql.begin(async(sql) => [
+      seedUsers(sql),
+      seedCustomers(sql),
+      seedInvoices(sql),
+      seedRevenue(sql),
+    ]);
 
     return Response.json({ message: 'Database seeded successfully' });
   } catch (error) {
-    console.error('Error seeding database:', error);
-    return Response.json({ error: error || 'Internal Server Error' }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }
